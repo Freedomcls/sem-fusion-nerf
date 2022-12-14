@@ -15,6 +15,21 @@ import random
 from models.pigan.op.math_utils_torch import *
 
 
+def get_dense_xyz(N_grid, vol_range =  [[-1,1], [-1, 1], [-1, 1]]):
+    xmin = vol_range[0][0]
+    xmax = vol_range[0][1]
+    ymin = vol_range[1][0]
+    ymax = vol_range[1][1]
+    zmin = vol_range[2][0]
+    zmax = vol_range[2][1]
+
+    x = np.linspace(xmin, xmax, N_grid)
+    y = np.linspace(ymin, ymax, N_grid)
+    z = np.linspace(zmin, zmax, N_grid)
+    xyz_ = torch.FloatTensor(np.stack(np.meshgrid(x, y, z), -1).reshape(-1, 3)).cuda()
+    return xyz_
+
+
 def fancy_integration(rgb_sigma, z_vals, device, noise_std=0.5, last_back=False, white_back=False, clamp_mode=None, fill_mode=None):
     """Performs NeRF volumetric rendering."""
 

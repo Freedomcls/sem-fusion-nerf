@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch
 
 from models.pigan.op.volumetric_rendering import *
+from models.synthesize import gen3d_via_sigmas
 
 
 class ImplicitGenerator3d(nn.Module):
@@ -129,6 +130,30 @@ class ImplicitGenerator3d(nn.Module):
         batch_size = frequencies.shape[0]
 
         self.generate_avg_frequencies()
+        N_grid = 512
+        Range = 20
+        sigma_thr = 0.01
+
+        ######## nerf way
+        vol_range =  [[-Range,Range], [-Range, Range], [-Range, Range]]
+        xyz_ = get_dense_xyz(N_grid, vol_range) # N_rays x 3
+        dir_ = torch.zeros_like(xyz_).cuda() # N_rays x 3
+        with torch.no_grad():
+            B = xyz_.shape[0]
+            out_chunks = []
+            chunk = frequencies.shape[1]
+            for i in range(0, B, chunk):
+
+                _chunk_out = self.siren.forward_with_frequencies_phase_shifts(xyz_[i:i+chunk][None, ], frequencies, phase_shifts, 
+                    ray_directions=dir_[i:i+chunk][None, ])
+                out_chunks += [_chunk_out[0]]
+
+        rgbsigma = torch.cat(out_chunks, 0)
+        sigmas = rgbsigma[..., 3]
+        gen3d_via_sigmas(sigmas, (N_grid, N_grid, N_grid), sigma_threshold=sigma_thr, vol_range = vol_range) 
+
+        import pdb; pdb.set_trace()
+
 
         with torch.no_grad():
             points_cam, z_vals, rays_d_cam = get_initial_rays_trig(batch_size, num_steps, resolution=(img_size, img_size), device=self.device,
