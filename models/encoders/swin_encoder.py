@@ -127,39 +127,8 @@ class SwinTransformer(nn.Module):
         x = torch.flatten(x, 1)
         return x
 
-    def forward_features_fusion(self, x):
-        x = [self.patch_drop(mask) for mask in x]
-        x = torch.stack(x,1)
-        # print('stack',x,x.shape)
-        x = torch.max(x,1)[0].view(x.shape[1],3136,-1)
-        # print('max',x,x.shape)
-        for layer in self.layers:
-            x = layer(x)
-
-        x = self.norm(x)  # B L C
-        x = self.avgpool(x.transpose(1, 2))  # B C 1
-        x = torch.flatten(x, 1)
-            
-        return x
-
-    def patch_drop(self, x):
-        x = self.patch_embed(x)
-        if self.ape:
-            x = x + self.absolute_pos_embed
-        x = self.pos_drop(x)
-        return x
-
     def forward(self, x):
-        # x = self.forward_features(x)
-        # x = self.forward_features_fusion(x)
-        # print('input',x,x.shape)
-        x = [self.forward_features(mask) for mask in x]
-        # print('forward',x[0].shape)
-        x = torch.stack(x,0)
-        # print('stack',x.shape)
-        # x = x.squeeze(1)
-        x = torch.max(x,0)[0]
-        # print('max',x.shape)   
+        x = self.forward_features(x)
         x = self.head(x)
         x = self.feat_to_out_dict(x)
         return x

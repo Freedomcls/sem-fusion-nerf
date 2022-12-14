@@ -16,6 +16,8 @@ import cv2
 
 sys.path.append(".")
 sys.path.append("..")
+
+
 from configs import data_configs
 from datasets.inference_dataset import InferenceDataset3D
 from options.test_options import TestOptions

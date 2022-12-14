@@ -45,24 +45,12 @@ class InferenceDataset3D(Dataset):
 
     def __getitem__(self, index):
         from_path = self.paths[index]
-        # from_im = Image.open(from_path)
-        # from_im = from_im.convert('RGB') if self.opts.label_nc == 0 else from_im.convert('L')
-        # from_im = self.update_labels(from_im)
-        # from_im_raw = from_im
-        # if self.transform:
-        #     from_im = self.transform(from_im)
-
-        from_ims = []
-        for filename in os.listdir('/home/chenlinsheng/sem2nerf/data/Sequence_1/semantic-masks'):
-            # from_path_1 = self.source_paths[index]
-            # print(index)
-            from_im = Image.open('/home/chenlinsheng/sem2nerf/data/Sequence_1/semantic-masks/' + filename)
-            from_im = from_im.convert('RGB') if self.opts.label_nc == 0 else from_im.convert('L')
-            from_im = self.update_labels(from_im)
-            from_im_raw = from_im
-            if self.source_transform:
-                from_im = self.source_transform(from_im)
-            from_ims.append(from_im)
+        from_im = Image.open(from_path)
+        from_im = from_im.convert('RGB') if self.opts.label_nc == 0 else from_im.convert('L')
+        from_im = self.update_labels(from_im)
+        from_im_raw = from_im
+        if self.transform:
+            from_im = self.transform(from_im)
 
         im_id = os.path.splitext(os.path.basename(from_path))[0]
 
@@ -82,10 +70,11 @@ class InferenceDataset3D(Dataset):
         if self.opts.use_original_pose:
             # im_pose = self.get_pose_by_image_path(from_path)
             im_pose = self.get_pose(from_path)
-            return from_ims, im_pose, im_id
+            return from_im, im_pose, im_id
         else:
             im_pose = self.get_pose(from_path)
-            return from_ims, im_pose, im_id
+            return from_im, im_pose, im_id
+            # return from_im, im_id
 
     def build_poses_mapping_dict(self, poses_file):
         if self.env_name == "CelebAMask_HQ":
@@ -123,21 +112,26 @@ class InferenceDataset3D(Dataset):
         return yaw, pitch
     
     def get_pose(self, image_path):
+        # cur_id = [0,4,8,12,16]
         # cur_id = 0
         cur_id = int(os.path.basename(image_path).split('.')[0])
         
-        with open('/home/chenlinsheng/sem2nerf/data/Sequence_1/traj_w_c.txt') as file:
+        with open('/home/zhangyue/projects/sem-fusion-nerf/data/semantic-masks/traj_w_c.txt') as file:
             p = file.read()
 
         rows = p.split('\n')
         pose = []
+        # poses = []
+        # for id in cur_id:
         for row in rows:
             pose.append(re.findall('[\d+-\.e]+', row))
         # np.array(pose, dtype=float)
         cur_pose = pose[cur_id]
         cur_pose = np.array(cur_pose).reshape(4,4)
         cur_pose = cur_pose.astype(np.float32)
+            # poses.append(cur_pose)
 
+        # return poses
         return cur_pose
 
     def update_labels(self, ori_labels):

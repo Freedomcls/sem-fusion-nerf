@@ -1,20 +1,17 @@
 """
 This file defines the core research contribution
 """
-from argparse import Namespace
-
-import matplotlib
-import torch
-import yaml
-from torch import nn
-
 from configs.paths_config import model_paths
-from models.encoders import swin_encoder
+from models.pigan.op import siren, curriculums
 from models.pigan import model as pigan_model
-from models.pigan.op import curriculums, siren
+import yaml
 from utils.common import filt_ckpt_keys
 from utils.train_utils import requires_grad
-
+from models.encoders import swin_encoder
+from torch import nn
+import torch
+import matplotlib
+from argparse import Namespace
 matplotlib.use('Agg')
 
 
@@ -82,25 +79,25 @@ class Sem2NeRF(nn.Module):
         return encoder
 
     def load_weights(self):
-        # if self.opts.checkpoint_path is not None:
-        #     print('Loading Sem2NeRF from checkpoint: {}'.format(self.opts.checkpoint_path))
-        #     ckpt = torch.load(self.opts.checkpoint_path, map_location='cpu')
-        #     self.encoder.load_state_dict(get_keys(ckpt, 'encoder'), strict=True)
-        #     self.decoder.load_state_dict(get_keys(ckpt, 'decoder'), strict=True)
-        #     self.__load_latent_avg(ckpt)
-        # else:
-        
-        # Load pretrained weights for SwinEncoder
-        if self.opts.encoder_type in ['SwinEncoder']:
-            print('Loading encoders weights from swin_tiny_patch4_window7_224!')
-            encoder_ckpt = torch.load(model_paths['swin_tiny'], map_location='cpu')['model']
-            if self.opts.label_nc != 0:
-                encoder_ckpt = {k: v for k, v in encoder_ckpt.items() if not ('patch_embed' in k or 'head' in k)}
-            else:
-                encoder_ckpt = {k: v for k, v in encoder_ckpt.items() if not ('head' in k)}
-            self.encoder.load_state_dict(encoder_ckpt, strict=False)
+        if self.opts.checkpoint_path is not None:
+            print('Loading Sem2NeRF from checkpoint: {}'.format(self.opts.checkpoint_path))
+            ckpt = torch.load(self.opts.checkpoint_path, map_location='cpu')
+            self.encoder.load_state_dict(get_keys(ckpt, 'encoder'), strict=True)
+            self.decoder.load_state_dict(get_keys(ckpt, 'decoder'), strict=True)
+            self.__load_latent_avg(ckpt)
         else:
-            raise Exception('Unknown encoder type [%s]' % self.opts.encoder_type)
+        
+            # Load pretrained weights for SwinEncoder
+            if self.opts.encoder_type in ['SwinEncoder']:
+                print('Loading encoders weights from swin_tiny_patch4_window7_224!')
+                encoder_ckpt = torch.load(model_paths['swin_tiny'], map_location='cpu')['model']
+                if self.opts.label_nc != 0:
+                    encoder_ckpt = {k: v for k, v in encoder_ckpt.items() if not ('patch_embed' in k or 'head' in k)}
+                else:
+                    encoder_ckpt = {k: v for k, v in encoder_ckpt.items() if not ('head' in k)}
+                self.encoder.load_state_dict(encoder_ckpt, strict=False)
+            else:
+                raise Exception('Unknown encoder type [%s]' % self.opts.encoder_type)
             
     #         # load pigan decoder pretrained weights
     #         print('Loading decoder weights from pretrained!')

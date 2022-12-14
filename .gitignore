@@ -1,0 +1,13 @@
+
+__pycache__/
+
+*.pth
+*.pt
+ckpts
+data
+out
+# local setting
+.vscode/
+
+
+

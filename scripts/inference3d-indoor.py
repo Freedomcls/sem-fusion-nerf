@@ -13,6 +13,7 @@ import sys
 from torchvision.utils import save_image
 import torch.nn.functional as F
 import cv2
+sys.path.remove("/home/zhangyue/deeproute/deeproute_vision/vision_train_framework")
 
 sys.path.append(".")
 sys.path.append("..")
@@ -168,8 +169,8 @@ def get_trajectory(trajectory_type, curriculum, opts):
 def run_on_batch_images(inputs, net, opts, latent_mask=None, latent_to_inject=None):
     result_batch = []
     poses = []
-    # init_h_mean = getattr(curriculums, opts.pigan_curriculum_type)['h_mean']
-    # v_mean = getattr(curriculums, opts.pigan_curriculum_type)['v_mean']
+    init_h_mean = getattr(curriculums, opts.pigan_curriculum_type)['h_mean']
+    v_mean = getattr(curriculums, opts.pigan_curriculum_type)['v_mean']
 
     if opts.use_original_pose:
         x, pose, _ = inputs
@@ -177,10 +178,10 @@ def run_on_batch_images(inputs, net, opts, latent_mask=None, latent_to_inject=No
         poses.append(pose)
     else:
         x, pose, _ = inputs
-        # v_mean = pose[1]
         poses.append(pose)
+        # x, _ = inputs
 
-    # v_mean = torch.tensor(v_mean).repeat(x.shape[0])
+    v_mean = torch.tensor(v_mean).repeat(x.shape[0])
     x = x.float().to(opts.device)
 
     # prepare all poses
@@ -195,24 +196,6 @@ def run_on_batch_images(inputs, net, opts, latent_mask=None, latent_to_inject=No
     # for face_angle in face_angles:
     #     cur_pose = (torch.tensor(face_angle).repeat(x.shape[0]), v_mean)
     #     poses.append(cur_pose)
-
-    # cur_id = 0
-    # with open('/home/freedom/project/sem2nerf/data/Sequence_1/traj_w_c.txt') as file:
-    #     p = file.read()
-    # file.close()
-
-    # rows = p.split('\n')
-    # pose = []
-    # for row in rows:
-    #     pose.append(re.findall('[\d+-\.e]+', row))
-    # # np.array(pose, dtype=float)
-    # cur_pose = pose[cur_id]
-    # # print('cur_pose', cur_pose)
-    # cur_pose = np.array(cur_pose).reshape(4,4)
-    # # cur_pose = torch.tensor(cur_pose)
-    # poses = cur_pose.astype(np.float32)
-    # poses = torch.tensor(poses)
-    # print('cur_pose', poses)
 
     # update x based on type and size
     x_im = x.clone().cpu().detach()
