@@ -54,29 +54,24 @@ class CustomMappingNetwork(nn.Module):
         super().__init__()
 
         self.network = nn.Sequential(nn.Linear(z_dim, map_hidden_dim),
-                                    #  nn.LeakyReLU(0.2, inplace=True),
-                                    nn.LeakyReLU(0.2),
+                                     nn.LeakyReLU(0.2, inplace=True),
 
                                      nn.Linear(map_hidden_dim, map_hidden_dim),
-                                    #  nn.LeakyReLU(0.2, inplace=True),
-                                    nn.LeakyReLU(0.2),
+                                     nn.LeakyReLU(0.2, inplace=True),
 
                                      nn.Linear(map_hidden_dim, map_hidden_dim),
-                                    #  nn.LeakyReLU(0.2, inplace=True),
-                                    nn.LeakyReLU(0.2),
+                                     nn.LeakyReLU(0.2, inplace=True),
 
                                      nn.Linear(map_hidden_dim, map_output_dim))
 
         self.network.apply(kaiming_leaky_init)
-        # with torch.no_grad():
-        #     self.network[-1].weight *= 0.25
+        with torch.no_grad():
+            self.network[-1].weight *= 0.25
 
     def forward(self, z):
-        # print(11111111111111)
         frequencies_offsets = self.network(z)
         frequencies = frequencies_offsets[..., :frequencies_offsets.shape[-1]//2]
         phase_shifts = frequencies_offsets[..., frequencies_offsets.shape[-1]//2:]
-        # print(222222222222222)
 
         return frequencies, phase_shifts
 
@@ -200,21 +195,15 @@ class SPATIALSIRENBASELINE(nn.Module):
         self.color_layer_linear.apply(frequency_init(25))
         self.network[0].apply(first_layer_film_sine_init)
 
-        self.gridwarper = UniformBoxWarp(50)  # Don't worry about this, it was added to ensure compatibility with another model. Shouldn't affect performance.
+        self.gridwarper = UniformBoxWarp(51)  # Don't worry about this, it was added to ensure compatibility with another model. Shouldn't affect performance.
         # self.gridwarper = UniformBoxWarp(12) 
         # self.gridwarper = UniformBoxWarp(0.24)  # Don't worry about this, it was added to ensure compatibility with another model. Shouldn't affect performance.
 
     def forward(self, input, z, ray_directions, **kwargs):
-        # print(111111111111111)
         frequencies, phase_shifts = self.mapping_network(z)
         return self.forward_with_frequencies_phase_shifts(input, frequencies, phase_shifts, ray_directions, **kwargs)
-    
-    # def get_latent_code(self):
-    #     frequencies, phase_shifts = self.mapping_network(256)
-    #     return frequencies, phase_shifts
 
     def forward_with_frequencies_phase_shifts(self, input, frequencies, phase_shifts, ray_directions, **kwargs):
-        # print(self.z_dim)
         frequencies = frequencies*15 + 30
 
         input = self.gridwarper(input)
@@ -308,8 +297,7 @@ class EmbeddingPiGAN128(nn.Module):
 
         # !! Important !! Set this value to the expected side-length of your scene. e.g. for for faces, heads usually fit in
         # a box of side-length 0.24, since the camera has such a narrow FOV. For other scenes, with higher FOV, probably needs to be bigger.
-        # self.gridwarper = UniformBoxWarp(0.24)
-        self.gridwarper = UniformBoxWarp(12)
+        self.gridwarper = UniformBoxWarp(0.24)
 
     def forward(self, input, z, ray_directions, **kwargs):
         frequencies, phase_shifts = self.mapping_network(z)

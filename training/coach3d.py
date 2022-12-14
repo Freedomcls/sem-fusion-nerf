@@ -114,8 +114,8 @@ class Coach3D:
 
     def train(self):
         # show param numbers
-        nparams = sum(p.numel() for p in self.net.encoder_1.parameters())
-        print(f">>> [{self.net.subnet_attri_getter('encoder_1').__class__.__name__}] Parameter numbers: {nparams:,}")
+        nparams = sum(p.numel() for p in self.net.encoder.parameters())
+        print(f">>> [{self.net.subnet_attri_getter('encoder').__class__.__name__}] Parameter numbers: {nparams:,}")
         nparams = sum(p.numel() for p in self.net.subnet_attri_getter('decoder').siren.mapping_network.parameters())
         nparams2 = sum(p.numel() for p in self.net.subnet_attri_getter('decoder').siren.network.parameters())
         print(f">>> [Decoder] Parameter numbers: all {nparams:,} with old_map {nparams2:,}")
@@ -145,41 +145,23 @@ class Coach3D:
                     self.net_dis.train()
 
                 self.optimizer.zero_grad()
-                x, y, pose = batch['from_ims'], batch['to_im'], batch['im_pose']
-                # x_1, x_2, y, pose = batch['from_im_1'], batch['from_im_2'], batch['to_im'], batch['im_pose']
-                # print('pose',pose,pose.shape)
-                
-                x = [mask.float() for mask in x]
-                # x=[]
-                # for mask in x_fusion:
-                #     # print('x',img.shape,img)
-                #     mask = mask.float()
-                #     x.append(mask)
-
-                # print(mask)
-                # for im in x:
-                #     print('im',im.shape,im)
-                # x_2 = x_2.float()
+                x, y, pose = batch['from_im'], batch['to_im'], batch['im_pose']
+                # print('batch_pose',pose)
+                x = x.float()
                 # apply GAN loss on those extrem pose cases
                 train_rand_pose = False
                 # if random.random() < self.opts.train_rand_pose_prob:
                 #     train_rand_pose = True
                 #     pose = self.__get_randn_poses(x.shape[0])
 
-                # out_dict = self.net(x_1, x_2, pose, return_latents=False, iter_num=self.global_step)
                 out_dict = self.net(x, pose, return_latents=False, iter_num=self.global_step)
+                # out_dict = self.net(x, pose, return_latents=True, iter_num=self.global_step)
                 y_hat = out_dict['images']
                 # latent = out_dict['latents']
                 sample_pattern = out_dict['sample_pattern']
 
                 # match the batch size and shape
-                x = [i[:y_hat.shape[0]].to(self.device) for i in x]
-                # for mask in x:
-                #     # print('x',img.shape,img)
-                #     x = x[:y_hat.shape[0]].to(self.device)
-                #     x.append(mask)
-                # x = x[:y_hat.shape[0]].to(self.device)
-                # x_2 = x_2[:y_hat.shape[0]].to(self.device)
+                x = x[:y_hat.shape[0]].to(self.device)
                 y = y[:y_hat.shape[0]].to(self.device)
                 assert y.shape[-1] >= self.net.cur_pigan_env['img_size'], "Please load larger image, current: %d, expect: %d" % (y.shape[-1], self.net.cur_pigan_env['img_size'])
                 if y.shape[-1] != self.net.cur_pigan_env['img_size']:
@@ -187,8 +169,7 @@ class Coach3D:
                 if self.opts.patch_train and sample_pattern is not None:
                     y = F.grid_sample(y, sample_pattern.to(self.device), mode='bilinear', align_corners=True)
                 if self.opts.dis_lambda > 0:
-                    x = [F.interpolate(i, size=y_hat.shape[-1], mode='nearest') for i in x]
-                    # x = F.interpolate(x, size=y_hat.shape[-1], mode='nearest')
+                    x = F.interpolate(x, size=y_hat.shape[-1], mode='nearest')
 
                 # loss, loss_dict = self.calc_loss(x, y, y_hat, latent, train_rand_pose=train_rand_pose)
                 loss, loss_dict = self.calc_loss(x, y, y_hat, train_rand_pose=train_rand_pose)
@@ -199,17 +180,16 @@ class Coach3D:
                     self.lr_schedulers[0].step_update(self.global_step)
 
                 # train discriminator if needed
-                # if self.opts.dis_lambda > 0:
-                #     d_loss_dict = self.train_step_discriminator(x, y, y_hat)
-                #     loss_dict.update(d_loss_dict)
-                #     if self.opts.scheduler_name != 'none':
-                #         loss_dict['lr_dis'] = float(self.lr_schedulers[-1]._get_lr(self.global_step)[0])
-                #         self.lr_schedulers[-1].step_update(self.global_step)
-                
-                a = x[0]
+                if self.opts.dis_lambda > 0:
+                    d_loss_dict = self.train_step_discriminator(x, y, y_hat)
+                    loss_dict.update(d_loss_dict)
+                    if self.opts.scheduler_name != 'none':
+                        loss_dict['lr_dis'] = float(self.lr_schedulers[-1]._get_lr(self.global_step)[0])
+                        self.lr_schedulers[-1].step_update(self.global_step)
+
                 # Logging related
                 if self.global_step % self.opts.image_interval == 0 or (self.global_step < 1000 and self.global_step % 25 == 0):
-                    self.parse_and_log_images(a, y, y_hat, title='images/train/faces')
+                    self.parse_and_log_images(x, y, y_hat, title='images/train/faces')
                 if self.global_step % self.opts.board_interval == 0:
                     self.print_metrics(loss_dict, prefix='train')
                     distri_utils.fn_on_master_if_distributed(self.opts.distributed_train, self.log_metrics, loss_dict, prefix='train')
@@ -242,13 +222,10 @@ class Coach3D:
         self.net.eval()
         agg_loss_dict = []
         for batch_idx, batch in enumerate(self.test_dataloader):
-            x, y, pose = batch['from_ims'], batch['to_im'], batch['im_pose']
-            # x_1, x_2, y, pose = batch['from_im_1'], batch['from_im_2'], batch['to_im'], batch['im_pose']
+            x, y, pose = batch['from_im'], batch['to_im'], batch['im_pose']
 
             with torch.no_grad():
-                # x = x.float()
-                x = [mask.float() for mask in x]
-                # x_2 = x_2.float()
+                x = x.float()
                 out_dict = self.net.forward_inference(x, pose, latent_mask=self.val_latent_mask,
                                                         inject_latent=self.val_inject_latent, return_latents=False)
                                                         # inject_latent=self.val_inject_latent, return_latents=True)
@@ -273,9 +250,7 @@ class Coach3D:
             # Logging related
             postfix = '{:04d}'.format(batch_idx)
             if self.opts.distributed_train:
-                # x = [distri_utils.gather_object_in_order(mask.cuda()) for mask in x]
-                # x = distri_utils.gather_object_in_order(x.cuda())
-                # x_2 = distri_utils.gather_object_in_order(x_2.cuda())
+                x = distri_utils.gather_object_in_order(x.cuda())
                 y = distri_utils.gather_object_in_order(y)
                 y_hat = distri_utils.gather_object_in_order(y_hat)
                 # y_hat_front = distri_utils.gather_object_in_order(y_hat_front)
@@ -283,7 +258,7 @@ class Coach3D:
                 display_count = self.opts.test_batch_size * distri_utils.get_world_size()
             else:
                 display_count = self.opts.test_batch_size
-            self.parse_and_log_test_images(x[0], y, y_hat,
+            self.parse_and_log_test_images(x, y, y_hat,
                              title='images/test/faces',
                              subscript=postfix,
                              display_count=display_count)
@@ -319,7 +294,7 @@ class Coach3D:
                                                          f'Step - {self.global_step}, \n{loss_dict}\n')
 
     def configure_optimizers(self):
-        params = list(self.net.encoder_1.parameters())
+        params = list(self.net.encoder.parameters())
         if self.opts.train_decoder:
             params += list(self.net.decoder.parameters())
         if self.opts.optim_name == 'adam':
@@ -365,7 +340,7 @@ class Coach3D:
 
     # def calc_loss(self, x, y, y_hat, latent, phase='train', train_rand_pose=False):
     def calc_loss(self, x, y, y_hat, phase='train', train_rand_pose=False):
-        x = [mask.to(self.device) for mask in x]
+        x = x.to(self.device)
         y = y.to(self.device)
         y_hat = y_hat.to(self.device)
 
@@ -401,9 +376,9 @@ class Coach3D:
         if self.opts.dis_lambda > 0 and phase == 'train':
             if y_hat.shape[-1] != self.net_dis.img_size:
                 d_fake = self.net_dis(F.interpolate(y_hat, self.net_dis.img_size, mode='bilinear', align_corners=False),
-                                         F.interpolate(x[0], self.net_dis.img_size, mode='nearest'))
+                                         F.interpolate(x, self.net_dis.img_size, mode='nearest'))
             else:
-                d_fake = self.net_dis(y_hat, x[0])
+                d_fake = self.net_dis(y_hat, x)
             loss_g = train_utils.compute_bce(d_fake, 1)
             loss_dict['loss_g'] = loss_g
             loss += loss_g * self.opts.dis_lambda
@@ -431,7 +406,6 @@ class Coach3D:
         for i in range(display_count):
             cur_im_data = {
                 'input_face': common.log_input_image(x[i], self.opts),
-                # 'input_face': common.log_input_image(x_2[i], self.opts),
                 'target_face': common.tensor2im(y[i]),
                 'output_face': common.tensor2im(y_hat[i]),
             }
@@ -445,7 +419,6 @@ class Coach3D:
         for i in range(display_count):
             cur_im_data = {
                 'input_face': common.log_input_image(x[i], self.opts),
-                # 'input_face': common.log_input_image(x_2[i], self.opts),
                 'target_face': common.tensor2im(y[i]),
                 'output_face': common.tensor2im(y_hat[i]),
             }

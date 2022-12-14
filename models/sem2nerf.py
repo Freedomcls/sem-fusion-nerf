@@ -1,17 +1,20 @@
 """
 This file defines the core research contribution
 """
-from configs.paths_config import model_paths
-from models.pigan.op import siren, curriculums
-from models.pigan import model as pigan_model
+from argparse import Namespace
+
+import matplotlib
+import torch
 import yaml
+from torch import nn
+
+from configs.paths_config import model_paths
+from models.encoders import swin_encoder
+from models.pigan import model as pigan_model
+from models.pigan.op import curriculums, siren
 from utils.common import filt_ckpt_keys
 from utils.train_utils import requires_grad
-from models.encoders import swin_encoder
-from torch import nn
-import torch
-import matplotlib
-from argparse import Namespace
+
 matplotlib.use('Agg')
 
 
@@ -26,8 +29,7 @@ class Sem2NeRF(nn.Module):
         self.set_opts(opts)
 
         # set encoder
-        self.encoder_1 = self.set_encoder()
-        # self.encoder_2 = self.set_encoder()        
+        self.encoder = self.set_encoder()
 
         # set pigan decoder
         self.pigan_curriculum = getattr(curriculums, opts.pigan_curriculum_type)
@@ -37,8 +39,14 @@ class Sem2NeRF(nn.Module):
         # Load weights if needed
         self.load_weights()
         
-        # self.flag = 0
+        z = torch.randn((10000, self.decoder.z_dim))
+        # self.z = nn.Parameter(torch.randn((10000, self.decoder.z_dim), dtype=torch.float32))
 
+        with torch.no_grad():
+            frequencies, phase_shifts = self.decoder.siren.mapping_network(z)
+        avg_frequencies = frequencies.mean(0, keepdim=True)
+        avg_phase_shifts = phase_shifts.mean(0, keepdim=True)
+        self.latent_avg = (avg_frequencies, avg_phase_shifts)
 
     def update_pigan_curriculum(self):
         with open(self.opts.pigan_steps_conf, 'r') as f:
@@ -49,16 +57,14 @@ class Sem2NeRF(nn.Module):
         self.enc_device = gpu_ids[0]
         self.dec_device = gpu_ids[-1]
 
-        self.encoder_1 = self.encoder_1.to(self.enc_device)
-        # self.encoder_2 = self.encoder_2.to(self.enc_device)
+        self.encoder = self.encoder.to(self.enc_device)
         self.decoder = self.decoder.to(self.dec_device)
         self.decoder.set_device(self.dec_device)
         if hasattr(self, 'latent_avg'):
             self.latent_avg = [x.to(self.dec_device) for x in self.latent_avg]
 
         if self.opts.distributed_train and mode == 'train':
-            self.encoder_1 = torch.nn.parallel.DistributedDataParallel(self.encoder_1, device_ids=[self.enc_device], find_unused_parameters=True)
-            # self.encoder_2 = torch.nn.parallel.DistributedDataParallel(self.encoder_2, device_ids=[self.enc_device], find_unused_parameters=True)
+            self.encoder = torch.nn.parallel.DistributedDataParallel(self.encoder, device_ids=[self.enc_device], find_unused_parameters=True)
             self.decoder = torch.nn.parallel.DistributedDataParallel(self.decoder, device_ids=[self.dec_device], find_unused_parameters=True)
 
         self.running_mode = mode
@@ -76,6 +82,15 @@ class Sem2NeRF(nn.Module):
         return encoder
 
     def load_weights(self):
+        # if self.opts.checkpoint_path is not None:
+        #     print('Loading Sem2NeRF from checkpoint: {}'.format(self.opts.checkpoint_path))
+        #     ckpt = torch.load(self.opts.checkpoint_path, map_location='cpu')
+        #     self.encoder.load_state_dict(get_keys(ckpt, 'encoder'), strict=True)
+        #     self.decoder.load_state_dict(get_keys(ckpt, 'decoder'), strict=True)
+        #     self.__load_latent_avg(ckpt)
+        # else:
+        
+        # Load pretrained weights for SwinEncoder
         if self.opts.encoder_type in ['SwinEncoder']:
             print('Loading encoders weights from swin_tiny_patch4_window7_224!')
             encoder_ckpt = torch.load(model_paths['swin_tiny'], map_location='cpu')['model']
@@ -83,11 +98,24 @@ class Sem2NeRF(nn.Module):
                 encoder_ckpt = {k: v for k, v in encoder_ckpt.items() if not ('patch_embed' in k or 'head' in k)}
             else:
                 encoder_ckpt = {k: v for k, v in encoder_ckpt.items() if not ('head' in k)}
-            self.encoder_1.load_state_dict(encoder_ckpt, strict=False)
-            # self.encoder_2.load_state_dict(encoder_ckpt, strict=False)
+            self.encoder.load_state_dict(encoder_ckpt, strict=False)
         else:
             raise Exception('Unknown encoder type [%s]' % self.opts.encoder_type)
-
+            
+    #         # load pigan decoder pretrained weights
+    #         print('Loading decoder weights from pretrained!')
+    #         if self.opts.pigan_curriculum_type == "CelebAMask_HQ":
+    #             pigan_model_paths = model_paths['pigan_celeba']
+    #         elif self.opts.pigan_curriculum_type == "CatMask":
+    #             pigan_model_paths = model_paths['pigan_cat']
+    #         elif self.opts.pigan_curriculum_type == "replica":
+    #             pigan_model_paths = model_paths['pigan_cat']
+    #         else:
+    #             raise Exception("Cannot find environment %s" % self.opts.pigan_curriculum_type)
+    #         ckpt = torch.load(pigan_model_paths, map_location='cpu')
+    #         self.decoder.load_state_dict(ckpt, strict=False)
+    #         if self.opts.start_from_latent_avg:
+    #             self.__load_latent_avg(ckpt, repeat=1)
 
     def forward(self, x, pose, return_latents=False, iter_num=0):
         # update pigan curriculum
@@ -98,11 +126,7 @@ class Sem2NeRF(nn.Module):
         # x = torch.randn([1, 99, 224, 224])
 
         batch_size = cur_pigan_env['batch_size']
-        x = [mask[:batch_size].to(self.enc_device) for mask in x]
-
-        # x = x[:batch_size].to(self.enc_device)
-        # x_1 = x_1[:batch_size].to(self.enc_device)
-        # x_2 = x_2[:batch_size].to(self.enc_device)
+        x = x[:batch_size].to(self.enc_device)
         
         # yaw, pitch = pose
         # cur_pigan_env['h_mean'] = yaw[:batch_size].unsqueeze(-1).to(self.dec_device)
@@ -114,29 +138,12 @@ class Sem2NeRF(nn.Module):
         cur_pigan_env['hierarchical_sample'] = self.opts.pigan_train_hs
 
         # map input to latent space
-        # if self.flag == 0: 
-        #     x = x_1
-        #     self.flag = self.flag + 1
-        # elif self.flag == 1:
-        #     x = x_2
-        #     self.flag = self.flag - 1
-
-        enc_out_dict_1 = self.encoder_1(x)
-        # enc_out_dict_2 = self.encoder_2(x_2)
-
-        # frequencies_1, phase_shifts_1 = enc_out_dict_1['latent_code']
-        # frequencies_2, phase_shifts_2 = enc_out_dict_2['latent_code']
-
-        frequencies, phase_shifts = enc_out_dict_1['latent_code']
-
-        # frequencies = (frequencies_1 + frequencies_2)/2
-        # print('frequencies', frequencies_1, frequencies_1.shape)
-        # phase_shifts = (phase_shifts_1 + phase_shifts_2)/2
-        codes = [frequencies, phase_shifts]
-
-        # enc_out = enc_out_dict_1['latent_code'] + enc_out_dict_2['latent_code']
-
-        # codes = enc_out
+        enc_out_dict = self.encoder(x)
+        codes = enc_out_dict['latent_code']
+        if self.opts.start_from_latent_avg:
+            freq, shift = codes
+            codes = (freq.to(self.dec_device) + self.latent_avg[0].repeat(freq.shape[0], 1),
+                    shift.to(self.dec_device) + self.latent_avg[1].repeat(shift.shape[0], 1))
 
         # map latent code to output, need to update pigan decoder accordingly to match patch-scale first
         if self.opts.patch_train:
@@ -180,33 +187,11 @@ class Sem2NeRF(nn.Module):
         cur_pigan_env['lock_view_dependence'] = True
         cur_pigan_env['hierarchical_sample'] = True
         cur_pigan_env['last_back'] = True
-        # x_1 = x_1.to(self.enc_device)
-        # x_2 = x_2.to(self.enc_device)
-        # x = x.to(self.enc_device)
-        x = [mask.to(self.enc_device) for mask in x]
-
-
-        # if self.flag == 0: 
-        #     x = x_1
-        #     self.flag = self.flag + 1
-        # elif self.flag == 1:
-        #     x = x_2
-        #     self.flag = self.flag - 1
+        x = x.to(self.enc_device)
 
         # map input to latent code
-        enc_out_dict_1 = self.encoder_1(x)
-        # enc_out_dict_2 = self.encoder_2(x_2)
-
-        # frequencies_1, phase_shifts_1 = enc_out_dict_1['latent_code']
-        # frequencies_2, phase_shifts_2 = enc_out_dict_2['latent_code']
-
-        frequencies, phase_shifts = enc_out_dict_1['latent_code']
-
-        # frequencies = (frequencies_1 + frequencies_2)/2
-        # print('frequencies', frequencies_1, frequencies_1.shape)
-        # phase_shifts = (phase_shifts_1 + phase_shifts_2)/2
-        codes = [frequencies, phase_shifts]
-
+        enc_out_dict = self.encoder(x)
+        codes = enc_out_dict['latent_code']
         if self.opts.start_from_latent_avg:
             freq, shift = codes
             codes = (freq.to(self.dec_device) + self.latent_avg[0].repeat(freq.shape[0], 1),
@@ -267,6 +252,5 @@ class Sem2NeRF(nn.Module):
             return getattr(self, subnet)
 
     def requires_grad(self, enc_flag, dec_flag=False):
-        requires_grad(self.encoder_1, enc_flag)
-        # requires_grad(self.encoder_2, enc_flag)
+        requires_grad(self.encoder, enc_flag)
         requires_grad(self.decoder, dec_flag)

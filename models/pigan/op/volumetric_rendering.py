@@ -122,8 +122,6 @@ def transform_sampled_points(points, z_vals, ray_directions, device, h_stddev=1,
     points_homogeneous = torch.ones((points.shape[0], points.shape[1], points.shape[2], points.shape[3] + 1), device=device)
     points_homogeneous[:, :, :, :3] = points
 
-    # print('bmm',points_homogeneous.reshape(n, -1, 4).permute(0, 2, 1),points_homogeneous.reshape(n, -1, 4).permute(0, 2, 1).shape)
-
     # should be n x 4 x 4 , n x r^2 x num_steps x 4
     transformed_points = torch.bmm(cam2world_matrix, points_homogeneous.reshape(n, -1, 4).permute(0, 2, 1)).permute(0, 2, 1).reshape(n, num_rays, num_steps, 4)
 

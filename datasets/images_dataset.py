@@ -12,7 +12,6 @@ from utils.common import convert_mask_label_to_visual
 import tensorboard_data_server
 import linecache
 import re
-import random
 
 class ImagesDataset3D(Dataset):
 
@@ -48,7 +47,7 @@ class ImagesDataset3D(Dataset):
         pose_path = os.path.join(*source_root.split('/')[:-1], pose_file_name)
         self.path = pose_path
         # print('1pspath',pose_path)
-        # self.pose_dict = self.build_poses_mapping_dict(pose_path)
+        self.pose_dict = self.build_poses_mapping_dict(pose_path)
 
         if opts.use_contour:  # remove the [-2] item, [ToOneHot]
             self.contour_transfrom = transforms.Compose(self.source_transform.transforms[:-2] + [self.source_transform.transforms[-1]])
@@ -58,27 +57,13 @@ class ImagesDataset3D(Dataset):
 
     def __getitem__(self, index):
         # read the input semantic mask labels
-        from_ims = []
-        for filename in os.listdir('/home/chenlinsheng/sem2nerf/data/Sequence_1/semantic-masks'):
-            # from_path_1 = self.source_paths[index]
-            # print(index)
-            from_im = Image.open('/home/chenlinsheng/sem2nerf/data/Sequence_1/semantic-masks/' + filename)
-            from_im = from_im.convert('RGB') if self.opts.label_nc == 0 else from_im.convert('L')
-            from_im = self.update_labels(from_im)
-            from_im_raw = from_im
-            if self.source_transform:
-                from_im = self.source_transform(from_im)
-            from_ims.append(from_im)
-
-        # gather another semantic mask
-        # idx = random.randint(1, 120)
-        # from_path_2 = self.source_paths[idx]
-        # from_im_2 = Image.open(from_path_2)
-        # from_im_2 = from_im.convert('RGB') if self.opts.label_nc == 0 else from_im_2.convert('L')
-        # from_im_2 = self.update_labels(from_im_2)
-        # # from_im_raw_2 = from_im_2
-        # if self.source_transform:
-        #     from_im_2 = self.source_transform(from_im_2)
+        from_path = self.source_paths[index]
+        from_im = Image.open(from_path)
+        from_im = from_im.convert('RGB') if self.opts.label_nc == 0 else from_im.convert('L')
+        from_im = self.update_labels(from_im)
+        from_im_raw = from_im
+        if self.source_transform:
+            from_im = self.source_transform(from_im)
 
         # read the GT output RGB images
         to_path = self.target_paths[index]
@@ -107,19 +92,12 @@ class ImagesDataset3D(Dataset):
         # im_pose = self.get_pose_by_image_path(to_path)
         # print(to_path)
         im_pose = self.get_pose(to_path)
-        # print('im_pose', im_pose)
 
         # print('typepose',type(im_pose),im_pose)
-        # print('from_ims', np.array(from_ims).shape)
-        # print('from__2', from_im_2)
-
         out_dict = {
-            # 'from_im_1': from_im_1,
-            # 'from_im_2': from_im_2,
-            'from_ims': from_ims,
+            'from_im': from_im,
             'to_im': to_im,
-            'im_pose': im_pose,
-            # 'cur_id': cur_id
+            'im_pose': im_pose
         }
 
         return out_dict
@@ -134,9 +112,6 @@ class ImagesDataset3D(Dataset):
         elif self.env_name == "replica":
             n_headlines = 0
             n_pose_params = 15
-        elif self.env_name == "chair":
-            n_headlines = 0
-            n_pose_params = 15
         else:
             raise Exception("Cannot find environment %s" % self.env_name)
 
@@ -146,8 +121,6 @@ class ImagesDataset3D(Dataset):
         poses_dict = {}
         i = 1
         if self.env_name == "replica":
-            i = 0
-        elif self.env_name == "chair":
             i = 0
         for line in lines:
             items = line.split(' ')
@@ -171,12 +144,14 @@ class ImagesDataset3D(Dataset):
 
     def get_pose(self, image_path):
         cur_id = int(os.path.basename(image_path).split('.')[0])
-
-        # print('cur_id', cur_id)
+        # print('self.path',self.path)
+        # print('cur_id',cur_id)
+        # cur_pose = self.pose_dict[cur_id]
+        # cur_pose = linecache.getline(self.path, cur_id).strip()
+        # cur_pose = map(float,cur_pose)
         
         with open(self.path) as file:
             p = file.read()
-        file.close()
 
         rows = p.split('\n')
         pose = []
@@ -184,7 +159,6 @@ class ImagesDataset3D(Dataset):
             pose.append(re.findall('[\d+-\.e]+', row))
         # np.array(pose, dtype=float)
         cur_pose = pose[cur_id]
-        # print('cur_pose', cur_pose)
         cur_pose = np.array(cur_pose).reshape(4,4)
         cur_pose = cur_pose.astype(np.float32)
 
@@ -201,7 +175,6 @@ class ImagesDataset3D(Dataset):
 
     def update_labels(self, ori_labels):
         if not self.opts.use_merged_labels:
-            # print(11111111)
             return ori_labels
         
         if self.env_name == "CelebAMask_HQ":
@@ -210,9 +183,6 @@ class ImagesDataset3D(Dataset):
             new_labels = [0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 0, 7, 0]
         elif self.env_name == "replica":
             new_labels = [0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 0, 7, 0]
-        elif self.env_name == "chair":
-            new_labels = [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0]
-            # new_labels = [0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 0, 7, 0, 13, 14, 15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 12, 13, 14, 15, 0, 0, 0]
         else:
             raise Exception("Cannot find environment %s" % self.env_name)
 
